@@ -13,17 +13,29 @@ var _ = require('lodash');
 var log4js = require('log4js');
 
 // variable
-var ossConf = {
+var parameters = {
+  conf: __dirname + '/env.conf',
+  prefix: null,
+  marker: null,
+  delimiter: null,
+  number: null,
+  expireDate: null
+}
+
+parameters.ossConf = {
   accessKeyId: null,
   accessKeySecret: null,
   endpoint: 'http://oss-cn-hangzhou.aliyuncs.com',
   bucket: null,
-
 }
-var confFile = 'env.conf'
 var client;
 
-log4js.configure('log.json');
+// log
+if (!fs.existsSync('/var/log/oss/oss-tool.log')) {
+  fs.mkdirSync('/var/log/oss')
+  fs.writeFileSync('/var/log/oss/oss-tool.log')
+}
+log4js.configure(__dirname + '/log.json');
 var logger = log4js.getLogger('oss');
 logger.debug(_.join(process.argv, ' '))
 
@@ -103,15 +115,13 @@ program
   .option('-c, --conf <confFile>')
   .action(function(files, options) {
     checkConf(options);
-    let prefix = '';
-    if (options.prefix) {
-      prefix = options.prefix;
-      if (prefix.lastIndexOf('/') != prefix.length - 1) {
-        prefix += '/';
-      }
-    }
     _.forEach(files, function(file) {
-      uploadFileOrFloder(file, prefix)
+      if (fs.statSync(file).isDirectory()) {
+        if (file.lastIndexOf('/') != file.length - 1) {
+          file += '/';
+        }
+      }
+      uploadFileOrFloder(file, parameters.prefix)
     })
   })
 
@@ -125,15 +135,8 @@ program
   .option('-c, --conf <confFile>')
   .action(function(files, options) {
     checkConf(options);
-    let prefix = '';
-    if (options.prefix) {
-      prefix = options.prefix;
-      if (prefix.lastIndexOf('/') != prefix.length - 1) {
-        prefix += '/';
-      }
-    }
     _.forEach(files, function(file) {
-      downloadFile(prefix + file)
+      downloadFile(parameters.prefix + file)
     })
   })
 
@@ -147,15 +150,8 @@ program
   .option('-c, --conf <confFile>')
   .action(function(floders, options) {
     checkConf(options);
-    let prefix = '';
-    if (options.prefix) {
-      prefix = options.prefix;
-      if (prefix.lastIndexOf('/') != prefix.length - 1) {
-        prefix += '/';
-      }
-    }
     _.forEach(floders, function(floder) {
-      downloadFloder(prefix + floder)
+      downloadFloder(parameters.prefix + floder)
     })
   })
 
@@ -190,23 +186,16 @@ program
   .option('-c, --conf <confFile>')
   .action(function(floders, options) {
     checkConf(options);
-    let prefix = '';
-    if (options.prefix) {
-      prefix = options.prefix;
-      if (prefix.lastIndexOf('/') != prefix.length - 1) {
-        prefix += '/';
-      }
-    }
     _.forEach(floders, function(floder) {
       if (floder.lastIndexOf('/') != floder.length - 1) {
         floder += '/';
       }
       if (options.expireDate) {
-        deleteExpireFile(prefix + floder, options.expireDate);
+        deleteExpireFile(parameters.prefix + floder, options.expireDate);
       } else if (options.number) {
-        deleteRedundancyFile(prefix + floder, options.number);
+        deleteRedundancyFile(parameters.prefix + floder, options.number);
       } else {
-        deleteFloder(prefix + floder)
+        deleteFloder(parameters.prefix + floder)
       }
     })
   })
@@ -255,17 +244,17 @@ program
       date: options.date
     }
     co(function*() {
-      let getResult = yield client.getBucketLifecycle(ossConf.bucket, ossConf.endpoint);
+      let getResult = yield client.getBucketLifecycle(parameters.ossConf.bucket, parameters.ossConf.endpoint);
       let rules = getResult.rules;
       rules.push(newRule);
-      let putResult = yield client.putBucketLifecycle(ossConf.bucket, ossConf.endpoint, rules);
+      let putResult = yield client.putBucketLifecycle(parameters.ossConf.bucket, parameters.ossConf.endpoint, rules);
       logger.info(putResult);
     }).catch(function(err) {
       logger.error(err);
       let rules = [];
       rules.push(newRule);
       co(function*() {
-        let putResult = yield client.putBucketLifecycle(ossConf.bucket, ossConf.endpoint, rules);
+        let putResult = yield client.putBucketLifecycle(parameters.ossConf.bucket, parameters.ossConf.endpoint, rules);
         logger.info(putResult);
       })
     })
@@ -281,7 +270,7 @@ program
   .action(function(options) {
     checkConf(options);
     co(function*() {
-      let result = yield client.getBucketLifecycle(ossConf.bucket, ossConf.endpoint);
+      let result = yield client.getBucketLifecycle(parameters.ossConf.bucket, parameters.ossConf.endpoint);
       logger.info(result);
     }).catch(function(err) {
       logger.error(err);
@@ -300,7 +289,7 @@ program
   .action(function(options) {
     checkConf(options);
     co(function*() {
-      let getResult = yield client.getBucketLifecycle(ossConf.bucket, ossConf.endpoint);
+      let getResult = yield client.getBucketLifecycle(parameters.ossConf.bucket, parameters.ossConf.endpoint);
       let rules = getResult.rules;
       let index = _.findIndex(rules, function(rule) {
         return rule.id == options.id;
@@ -308,7 +297,7 @@ program
       if (index >= 0) {
         _.pullAt(rules, index);
       }
-      let putResult = yield client.putBucketLifecycle(ossConf.bucket, ossConf.endpoint, rules);
+      let putResult = yield client.putBucketLifecycle(parameters.ossConf.bucket, parameters.ossConf.endpoint, rules);
       logger.info(putResult);
     }).catch(function(err) {
       logger.error(err);
@@ -360,8 +349,10 @@ program.parse(process.argv);
 function uploadFileOrFloder(file, prefix) {
   if (fs.statSync(file).isFile()) {
     uploadFile(file, prefix);
-  } else if (fs.statSync(file).isDirectory) {
-    prefix += file.substr(file.lastIndexOf('/') + 1) + '/';
+  } else if (fs.statSync(file).isDirectory()) {
+    if (file.substr(file.lastIndexOf('/') + 1)) {
+      prefix += file.substr(file.lastIndexOf('/') + 1) + '/';
+    }
     uploadFloder(file, prefix);
   } else {
     logger.info("Can't find file or floder: " + file);
@@ -528,46 +519,71 @@ function setOssConfFromArgs(options) {
   if (options.conf) {
     setOssConfFromFile(options.conf)
   } else {
-    setOssConfFromFile(confFile)
+    setOssConfFromFile(parameters.conf)
   }
   if (options.accessKeyId) {
-    ossConf.accessKeyId = options.accessKeyId;
+    parameters.ossConf.accessKeyId = options.accessKeyId;
   }
   if (options.accessKeySecret) {
-    ossConf.accessKeySecret = options.accessKeySecret;
+    parameters.ossConf.accessKeySecret = options.accessKeySecret;
   }
   if (options.endpoint) {
-    ossConf.endpoint = options.endpoint;
+    parameters.ossConf.endpoint = options.endpoint;
   }
   if (options.bucket) {
-    ossConf.bucket = options.bucket;
+    parameters.ossConf.bucket = options.bucket;
+  }
+  if (options.prefix) {
+    parameters.prefix = options.prefix;
+  }
+  if (options.marker) {
+    parameters.marker = options.marker;
+  }
+  if (options.delimiter) {
+    parameters.delimiter = options.delimiter;
+  }
+  if (options.number) {
+    parameters.number = options.number;
+  }
+  if (options.expireDate) {
+    parameters.expireDate = options.expireDate;
+  }
+  if (parameters.prefix) {
+    if (parameters.prefix.lastIndexOf('/') != parameters.prefix.length - 1) {
+      parameters.prefix += '/';
+    }
   }
 }
 
 function setOssConfFromFile(file) {
   if (!fs.existsSync(file)) {
-    if (file == confFile) {
+    if (file == parameters.conf) {
       return;
     }
     logger.info('conf file ' + file + ' is not exist, you need create it or run os-tool conf first')
     process.exit(1);
   } else {
     env(file);
-    ossConf.accessKeyId = process.env.accessKeyId;
-    ossConf.accessKeySecret = process.env.accessKeySecret;
-    ossConf.endpoint = process.env.endpoint;
-    ossConf.bucket = process.env.bucket;
+    parameters.ossConf.accessKeyId = process.env.accessKeyId;
+    parameters.ossConf.accessKeySecret = process.env.accessKeySecret;
+    parameters.ossConf.endpoint = process.env.endpoint;
+    parameters.ossConf.bucket = process.env.bucket;
+    parameters.prefix = process.env.prefix;
+    parameters.marker = process.env.marker;
+    parameters.delimiter = process.env.delimiter;
+    parameters.number = process.env.number;
+    parameters.expireDate = process.env.expireDate;
   }
 }
 
 function writeOssConfToFile() {
-  fs.writeFileSync(confFile, "");
-  _.forEach(ossConf, function(value, key) {
-    value && fs.appendFileSync(confFile, key + "=" + value + '\n');
+  fs.writeFileSync(parameters.conf, "");
+  _.forEach(parameters.ossConf, function(value, key) {
+    value && fs.appendFileSync(parameters.conf, key + "=" + value + '\n');
   })
 }
 
 function checkConf(options) {
   setOssConfFromArgs(options);
-  client = new OSS(ossConf);
+  client = new OSS(parameters.ossConf);
 }
